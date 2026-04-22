@@ -8,8 +8,8 @@ import os
 import io
 from datetime import timedelta
 
-import pdfplumber # for PDF text extractio
-from analyzer import analyze_resume 
+import pdfplumber
+from analyzer import analyze_resume
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -24,30 +24,35 @@ from pymongo.errors import DuplicateKeyError
 load_dotenv()
 
 # ─────────────────────────────────────────────
-#  APP INIT
+# APP INIT
 # ─────────────────────────────────────────────
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+
+#  FIXED CORS (FULL)
+CORS(
+    app,
+    resources={r"/*": {"origins": "*"}},
+    supports_credentials=True,
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"]
+)
 
 # ─────────────────────────────────────────────
-#  CONFIG
+# CONFIG
 # ─────────────────────────────────────────────
-app.config["JWT_SECRET_KEY"]           = os.environ.get("JWT_SECRET_KEY", "change-me-in-production")
+app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "change-me-in-production")
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=24)
 
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/resume_analyzer")
 
 # ─────────────────────────────────────────────
-#  EXTENSIONS
+# EXTENSIONS
 # ─────────────────────────────────────────────
 bcrypt = Bcrypt(app)
 jwt    = JWTManager(app)
 
 # ─────────────────────────────────────────────
-#  DATABASE
-# ─────────────────────────────────────────────
-# ─────────────────────────────────────────────
-#  DATABASE (FIXED)
+# DATABASE
 # ─────────────────────────────────────────────
 client = MongoClient(
     MONGO_URI,
@@ -55,14 +60,12 @@ client = MongoClient(
     tlsAllowInvalidCertificates=True
 )
 
-# Explicit DB (avoid "No default database" issues)
 db = client["resume_analyzer"]
-
 users = db["users"]
 users.create_index("email", unique=True)
 
 # ─────────────────────────────────────────────
-#  RESPONSE HELPERS
+# HELPERS
 # ─────────────────────────────────────────────
 def err(msg, code=400):
     return jsonify({"success": False, "error": msg}), code
@@ -70,24 +73,21 @@ def err(msg, code=400):
 def ok(data, code=200):
     return jsonify({"success": True, **data}), code
 
-
 # ─────────────────────────────────────────────
-#  ROUTES
+# ROUTES
 # ─────────────────────────────────────────────
 
 @app.route("/", methods=["GET"])
 def health():
     return ok({"message": "AI Resume Analyzer API is running."})
 
-
 # ── REGISTER ─────────────────────────────────
-@app.route("/register", methods=["POST"])
+@app.route("/register", methods=["POST", "OPTIONS"])
 def register():
-    # Accept both JSON and form-data
-    if request.is_json:
-        data = request.get_json(silent=True) or {}
-    else:
-        data = request.form.to_dict()
+    if request.method == "OPTIONS":
+        return ok({})
+
+    data = request.get_json(silent=True) or request.form.to_dict()
 
     if not data:
         return err("Request body must be JSON or form data.")
@@ -117,15 +117,13 @@ def register():
         "message": "Welcome! Your account has been created successfully.",
     }, 201)
 
-
 # ── LOGIN ─────────────────────────────────────
-@app.route("/login", methods=["POST"])
+@app.route("/login", methods=["POST", "OPTIONS"])
 def login():
-    # Accept both JSON and form-data
-    if request.is_json:
-        data = request.get_json(silent=True) or {}
-    else:
-        data = request.form.to_dict()
+    if request.method == "OPTIONS":
+        return ok({})
+
+    data = request.get_json(silent=True) or request.form.to_dict()
 
     if not data:
         return err("Email and password are required.")
@@ -140,7 +138,6 @@ def login():
     if not user or not bcrypt.check_password_hash(user["password"], password):
         return err("Invalid email or password.", 401)
 
-    # Personalized welcome message
     name = user.get("name", "").strip()
     if user.get("first_login", True):
         message = f"Welcome, {name}! 👋" if name else "Welcome! 👋"
@@ -157,23 +154,24 @@ def login():
         "name":    name,
     })
 
-
-# ── ANALYZE (Protected) ───────────────────────
-@app.route("/analyze", methods=["POST"])
+# ── ANALYZE ───────────────────────────────────
+@app.route("/analyze", methods=["POST", "OPTIONS"])
 @jwt_required()
 def analyze():
+    if request.method == "OPTIONS":
+        return ok({})
+
     current_user = get_jwt_identity()
 
     job_description = request.form.get("job_description", "").strip()
     resume_file     = request.files.get("resume")
 
     if not resume_file or not job_description:
-        return err("Both 'resume' (PDF) and 'job_description' are required.")
+        return err("Both 'resume' and 'job_description' are required.")
 
     if not resume_file.filename.lower().endswith(".pdf"):
         return err("Only PDF files are accepted.")
 
-    # ── PDF text extraction ───────────────────
     try:
         pdf_bytes   = resume_file.read()
         resume_text = ""
@@ -186,19 +184,13 @@ def analyze():
         return err(f"Could not read PDF: {str(e)}")
 
     if not resume_text.strip():
-        return err(
-            "No text could be extracted from the PDF. "
-            "Please use a text-based PDF (not a scanned image)."
-        )
+        return err("No text could be extracted from the PDF.")
 
-    # ── ATS Analysis ─────────────────────────
     try:
         result = analyze_resume(resume_text, job_description)
     except Exception as e:
-        return err(f"Analysis engine error: {str(e)}")
-    
-    result = analyze_resume(resume_text, job_description)
-    
+        return err(f"Analysis error: {str(e)}")
+
     return ok({
         "analyzed_by":    current_user,
         "score":          result["score"],
@@ -209,26 +201,24 @@ def analyze():
         "resume_length":  len(resume_text.split()),
     })
 
-
 # ─────────────────────────────────────────────
-#  JWT ERROR HANDLERS
+# JWT ERRORS
 # ─────────────────────────────────────────────
 @jwt.unauthorized_loader
 def unauthorized_cb(reason):
-    return err("Authorization token missing or invalid. Please log in.", 401)
+    return err("Authorization token missing or invalid.", 401)
 
 @jwt.expired_token_loader
 def expired_cb(header, data):
-    return err("Session expired. Please log in again.", 401)
+    return err("Session expired.", 401)
 
 @jwt.invalid_token_loader
 def invalid_cb(reason):
-    return err("Invalid token. Please log in again.", 401)
-
+    return err("Invalid token.", 401)
 
 # ─────────────────────────────────────────────
-#  RUN
+# RUN
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port)
