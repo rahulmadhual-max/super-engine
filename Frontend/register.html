@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create Account — AI Resume Analyzer</title>
+  <link rel="stylesheet" href="css/global.css" />
+  <link rel="stylesheet" href="css/auth.css" />
+</head>
+<body>
+
+<div class="auth-page">
+
+  <!-- ── Brand Panel ── -->
+  <div class="auth-brand">
+    <div class="brand-logo">
+      <div class="brand-logo-icon">◆</div>
+      ResumeAI
+    </div>
+
+    <div class="brand-hero">
+      <h1>Land your <em>dream</em><br>job faster</h1>
+      <p>
+        Get instant ATS feedback, identify skill gaps, and receive
+        tailored suggestions — all in under 10 seconds.
+      </p>
+    </div>
+
+    <div class="brand-stats">
+      <div class="stat">
+        <span class="stat-num">Free</span>
+        <span class="stat-label">To get started</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num">&lt;10s</span>
+        <span class="stat-label">Analysis time</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num">100%</span>
+        <span class="stat-label">Domain-agnostic</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Form Panel ── -->
+  <div class="auth-form-panel">
+    <div class="auth-card">
+
+      <div class="auth-card-header">
+        <h2>Create account</h2>
+        <p>Start analyzing your resume for free</p>
+      </div>
+
+      <form class="auth-form" id="registerForm" novalidate>
+
+        <div class="form-group">
+          <label class="form-label" for="name">Full name</label>
+          <input
+            class="form-input" id="name" type="text"
+            placeholder="Jane Doe" autocomplete="name"
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="email">Email address</label>
+          <input
+            class="form-input" id="email" type="email"
+            placeholder="you@example.com" autocomplete="email" required
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="password">Password</label>
+          <input
+            class="form-input" id="password" type="password"
+            placeholder="Min. 6 characters" autocomplete="new-password" required
+          />
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="submitBtn">
+          Create account
+        </button>
+
+      </form>
+
+      <div class="auth-footer">
+        Already have an account?
+        <a href="login.html">Sign in →</a>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script src="js/utils.js"></script>
+<script>
+  if (Auth.isLoggedIn()) window.location.href = "index.html";
+
+  document.getElementById("registerForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const name     = document.getElementById("name").value.trim();
+    const email    = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+    const btn      = document.getElementById("submitBtn");
+
+    if (!email || !password) {
+      showToast("Email and password are required.", "error");
+      return;
+    }
+    if (password.length < 6) {
+      showToast("Password must be at least 6 characters.", "error");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span> Creating account…`;
+
+    const { ok, data } = await apiFetch("/register", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password }),
+    });
+
+    btn.disabled = false;
+    btn.innerHTML = "Create account";
+
+    if (ok) {
+      showToast(data.message, "success");
+      setTimeout(() => window.location.href = "login.html", 1200);
+    } else {
+      showToast(data.error || "Registration failed. Please try again.", "error");
+    }
+  });
+</script>
+
+</body>
+</html>

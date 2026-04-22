@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — AI Resume Analyzer</title>
+  <link rel="stylesheet" href="css/global.css" />
+  <link rel="stylesheet" href="css/dashboard.css" />
+</head>
+<body>
+
+<div class="dashboard">
+
+  <!-- ══════════════════ HEADER ══════════════════ -->
+  <header class="header">
+    <div class="header-brand">
+      <div class="header-brand-icon">◆</div>
+      ResumeAI
+    </div>
+
+    <div class="header-right">
+      <div class="user-chip">
+        <div class="avatar" id="avatarInitial">?</div>
+        <span id="userEmail">Loading…</span>
+      </div>
+      <button class="btn btn-ghost" onclick="Auth.logout()" style="padding: 8px 16px; font-size:0.85rem;">
+        Sign out
+      </button>
+    </div>
+  </header>
+
+  <!-- ══════════════════ MAIN ══════════════════ -->
+  <main class="main">
+
+    <h1 class="main-title">Resume Analyzer</h1>
+    <p class="main-subtitle">Upload your resume and paste a job description to get your ATS score.</p>
+
+    <!-- Input panels -->
+    <div class="analyzer-grid">
+
+      <!-- Resume Upload -->
+      <div class="panel">
+        <div class="panel-title">
+          <span>📄</span> Resume (PDF)
+        </div>
+
+        <div class="drop-zone" id="dropZone">
+          <input type="file" id="resumeFile" accept=".pdf" />
+          <span class="drop-zone-icon">⬆</span>
+          <div class="drop-zone-text">
+            <strong>Click to upload</strong> or drag & drop<br>
+            <small style="color:var(--text-3)">PDF files only · Max 10 MB</small>
+          </div>
+        </div>
+
+        <div class="file-selected" id="fileSelected" style="display:none">
+          <span class="file-selected-icon">📄</span>
+          <span class="file-selected-name" id="fileName">—</span>
+          <button class="file-remove" id="fileRemove" title="Remove file">✕</button>
+        </div>
+      </div>
+
+      <!-- Job Description -->
+      <div class="panel">
+        <div class="panel-title">
+          <span>📋</span> Job Description
+        </div>
+        <textarea
+          class="form-textarea"
+          id="jobDescription"
+          placeholder="Paste the full job description here — the more detail, the better the analysis…"
+          style="min-height: 200px;"
+        ></textarea>
+      </div>
+
+    </div>
+
+    <!-- Analyze button -->
+    <div class="analyze-btn-wrap">
+      <button class="btn btn-ghost" id="resetBtn" style="display:none" onclick="resetAnalysis()">
+        ↺ Reset
+      </button>
+      <button class="btn btn-primary" id="analyzeBtn" onclick="runAnalysis()">
+        Analyze Resume →
+      </button>
+    </div>
+
+    <!-- Loading state -->
+    <div class="loading-overlay" id="loadingOverlay">
+      <div class="loading-ring"></div>
+      <p class="loading-text" id="loadingText">Initializing ATS engine…</p>
+    </div>
+
+    <!-- ══ RESULTS ══════════════════════════════════════════ -->
+    <div id="results">
+
+      <!-- Score + Breakdown -->
+      <div class="results-grid">
+
+        <!-- Score Ring -->
+        <div class="score-card">
+          <div class="score-ring-wrap">
+            <svg class="score-ring" width="160" height="160" viewBox="0 0 100 100">
+              <circle class="score-ring-bg"   cx="50" cy="50" r="45"/>
+              <circle class="score-ring-fill" cx="50" cy="50" r="45" id="scoreRingFill"/>
+            </svg>
+            <div class="score-label">
+              <span class="score-num" id="scoreNum">0</span>
+              <span class="score-denom">/100</span>
+            </div>
+          </div>
+          <div class="score-rating" id="scoreRating">—</div>
+          <div class="score-meta" id="scoreMeta">—</div>
+        </div>
+
+        <!-- Breakdown Bars -->
+        <div class="details-card">
+          <div class="breakdown-section">
+            <h3>Score Breakdown</h3>
+            <div id="breakdownBars"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Skills -->
+      <div class="skills-grid">
+        <div class="skills-card">
+          <h3><span>✓</span> Strengths</h3>
+          <div class="tags" id="strengthsTags"></div>
+        </div>
+        <div class="skills-card">
+          <h3><span style="color:var(--red)">✕</span> Missing Skills</h3>
+          <div class="tags" id="missingTags"></div>
+        </div>
+      </div>
+
+      <!-- Suggestions + Summary -->
+      <div class="bottom-grid">
+        <div class="list-card" id="suggestionsCard">
+          <h3><span>💡</span> Suggestions</h3>
+          <ul id="suggestionsList"></ul>
+        </div>
+        <div class="list-card">
+          <h3><span>📊</span> Analysis Summary</h3>
+          <ul id="summaryList"></ul>
+        </div>
+      </div>
+
+    </div>
+    <!-- / results -->
+
+  </main>
+</div>
+
+<script src="js/utils.js"></script>
+<script>
+// ── Auth guard ────────────────────────────────────────────────
+if (!Auth.requireAuth()) { /* redirected */ }
+
+// ── Init user info ────────────────────────────────────────────
+const name  = Auth.getName();
+const email = Auth.getEmail();
+
+document.getElementById("userEmail").textContent = name || email || "User";
+const initial = (name || email || "?")[0].toUpperCase();
+document.getElementById("avatarInitial").textContent = initial;
+
+
+// ── File handling ─────────────────────────────────────────────
+let selectedFile = null;
+
+const dropZone     = document.getElementById("dropZone");
+const fileInput    = document.getElementById("resumeFile");
+const fileSelected = document.getElementById("fileSelected");
+const fileName     = document.getElementById("fileName");
+const fileRemove   = document.getElementById("fileRemove");
+
+function setFile(file) {
+  if (!file || !file.name.toLowerCase().endsWith(".pdf")) {
+    showToast("Only PDF files are accepted.", "error");
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    showToast("File size must be under 10 MB.", "error");
+    return;
+  }
+  selectedFile = file;
+  fileName.textContent = file.name;
+  fileSelected.style.display = "flex";
+  dropZone.style.display = "none";
+}
+
+fileInput.addEventListener("change", (e) => {
+  if (e.target.files[0]) setFile(e.target.files[0]);
+});
+
+fileRemove.addEventListener("click", () => {
+  selectedFile = null;
+  fileInput.value = "";
+  fileSelected.style.display = "none";
+  dropZone.style.display = "block";
+});
+
+// Drag & drop
+dropZone.addEventListener("dragover",  (e) => { e.preventDefault(); dropZone.classList.add("drag-over"); });
+dropZone.addEventListener("dragleave", ()  => dropZone.classList.remove("drag-over"));
+dropZone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dropZone.classList.remove("drag-over");
+  const file = e.dataTransfer.files[0];
+  if (file) setFile(file);
+});
+
+
+// ── Loading messages ──────────────────────────────────────────
+const loadingMessages = [
+  "Parsing your resume…",
+  "Detecting job domain…",
+  "Extracting skills from job description…",
+  "Running TF-IDF keyword alignment…",
+  "Scoring experience depth…",
+  "Checking for keyword stuffing…",
+  "Finalizing ATS report…",
+];
+
+let loadingInterval;
+
+function startLoadingCycle() {
+  let i = 0;
+  const el = document.getElementById("loadingText");
+  el.textContent = loadingMessages[0];
+  loadingInterval = setInterval(() => {
+    i = (i + 1) % loadingMessages.length;
+    el.textContent = loadingMessages[i];
+  }, 1500);
+}
+
+function stopLoadingCycle() { clearInterval(loadingInterval); }
+
+
+// ── Run analysis ──────────────────────────────────────────────
+async function runAnalysis() {
+  const jd = document.getElementById("jobDescription").value.trim();
+
+  if (!selectedFile) { showToast("Please upload a PDF resume.", "error"); return; }
+  if (!jd)           { showToast("Please paste a job description.", "error"); return; }
+
+  // Show loading
+  document.getElementById("analyzeBtn").disabled = true;
+  document.getElementById("loadingOverlay").classList.add("active");
+  document.getElementById("results").classList.remove("show");
+  startLoadingCycle();
+
+  const formData = new FormData();
+  formData.append("resume", selectedFile);
+  formData.append("job_description", jd);
+
+  const token = Auth.getToken();
+  let res, data;
+
+  try {
+    res  = await fetch(`${API_URL}/analyze`, {
+      method:  "POST",
+      headers: { "Authorization": `Bearer ${token}` },
+      body:    formData,
+    });
+    data = await res.json();
+  } catch (err) {
+    stopLoadingCycle();
+    document.getElementById("loadingOverlay").classList.remove("active");
+    document.getElementById("analyzeBtn").disabled = false;
+    showToast("Network error. Please check your connection.", "error");
+    return;
+  }
+
+  stopLoadingCycle();
+  document.getElementById("loadingOverlay").classList.remove("active");
+  document.getElementById("analyzeBtn").disabled = false;
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      showToast("Session expired. Please sign in again.", "error");
+      setTimeout(() => Auth.logout(), 1500);
+    } else {
+      showToast(data.error || "Analysis failed.", "error");
+    }
+    return;
+  }
+
+  renderResults(data);
+  document.getElementById("resetBtn").style.display = "inline-flex";
+}
+
+
+// ── Render results ────────────────────────────────────────────
+function renderResults(data) {
+  // ── NEW analyzer keys: data.score, data.strengths, data.missing_skills ──
+  const score = data.score || 0;
+
+  // Score ring animation
+  const ringFill      = document.getElementById("scoreRingFill");
+  const circumference = 2 * Math.PI * 45; // r=45
+  const offset        = circumference - (score / 100) * circumference;
+
+  // Colour by score
+  let color = "#e05c5c";
+  if      (score >= 85) color = "#4caf7d";
+  else if (score >= 70) color = "#d4a843";
+  else if (score >= 50) color = "#5b9cf6";
+
+  ringFill.style.stroke = color;
+  setTimeout(() => { ringFill.style.strokeDashoffset = offset; }, 100);
+
+  // Animated counter
+  animateNumber("scoreNum", 0, score, 1200);
+
+  // Rating pill
+  const ratings = [
+    { min: 85, label: "Excellent Match", cls: "pill-green" },
+    { min: 70, label: "Good Match",      cls: "pill-gold"  },
+    { min: 50, label: "Average Match",   cls: "pill-gold"  },
+    { min: 0,  label: "Low Match",       cls: "pill-red"   },
+  ];
+  const ratingInfo = ratings.find(r => score >= r.min) || ratings[3];
+  document.getElementById("scoreRating").innerHTML =
+    `<span class="pill ${ratingInfo.cls}">${ratingInfo.label}</span>`;
+  document.getElementById("scoreMeta").textContent =
+    `${data.resume_length || 0} words in resume`;
+
+  // ── Breakdown bars ────────────────────────────────────────
+  const breakdown = data.breakdown || {};
+  const barDefs = [
+    { key: "keyword",    label: "Keywords",   max: 20, color: "#5b9cf6" },
+    { key: "skills",     label: "Skills",     max: 20, color: "#4caf7d" },
+    { key: "tools",      label: "Tools",      max: 15, color: "#d4a843" },
+    { key: "experience", label: "Experience", max: 20, color: "#c084fc" },
+    { key: "quality",    label: "Quality",    max: 10, color: "#f97316" },
+    { key: "relevance",  label: "Relevance",  max: 15, color: "#38bdf8" },
+    { key: "penalty",    label: "Penalty",    max: 10, color: "#e05c5c" },
+  ];
+
+  document.getElementById("breakdownBars").innerHTML = barDefs.map(b => {
+    const val     = breakdown[b.key] || 0;
+    const pct     = Math.abs(val / b.max) * 100;
+    const display = val < 0 ? val.toFixed(1) : `${val.toFixed(1)}/${b.max}`;
+    return `
+      <div class="breakdown-item">
+        <span class="breakdown-label">${b.label}</span>
+        <div class="breakdown-bar-track">
+          <div class="breakdown-bar-fill"
+               data-pct="${Math.min(pct, 100)}"
+               style="background:${b.color}; width:0%"></div>
+        </div>
+        <span class="breakdown-val">${display}</span>
+      </div>
+    `;
+  }).join("");
+
+  // Animate bars
+  setTimeout(() => {
+    document.querySelectorAll(".breakdown-bar-fill").forEach(el => {
+      el.style.width = el.dataset.pct + "%";
+    });
+  }, 120);
+
+  // ── Strengths (data.strengths) ────────────────────────────
+  const strengths = data.strengths || [];
+  document.getElementById("strengthsTags").innerHTML = strengths.length
+    ? strengths.map(s => `<span class="pill pill-green">${s}</span>`).join("")
+    : `<span style="color:var(--text-3);font-size:0.85rem">None detected</span>`;
+
+  // ── Missing Skills (data.missing_skills) ──────────────────
+  const missing = data.missing_skills || [];
+  document.getElementById("missingTags").innerHTML = missing.length
+    ? missing.slice(0, 15).map(s => `<span class="pill pill-red">${s}</span>`).join("")
+    : `<span class="pill pill-green">All key skills matched!</span>`;
+
+  // ── Suggestions ───────────────────────────────────────────
+  const suggestions = data.suggestions || [];
+  document.getElementById("suggestionsList").innerHTML = suggestions.length
+    ? suggestions.map(s => `
+        <li>
+          <span class="dot" style="background:var(--gold)"></span>
+          <span>${s}</span>
+        </li>
+      `).join("")
+    : `<li>
+        <span class="dot" style="background:var(--green)"></span>
+        <span>Your resume is well-aligned. Keep up the great work!</span>
+       </li>`;
+
+  // ── Summary ───────────────────────────────────────────────
+  const penalty = breakdown.penalty || 0;
+  document.getElementById("summaryList").innerHTML = `
+    <li>
+      <span class="dot" style="background:var(--blue)"></span>
+      <span>ATS Score: <strong>${score}/100</strong> — ${ratingInfo.label}</span>
+    </li>
+    <li>
+      <span class="dot" style="background:var(--green)"></span>
+      <span>${missing.length === 0
+        ? "All required skills detected in resume"
+        : `${missing.length} skill${missing.length > 1 ? "s" : ""} from the JD are missing`}
+      </span>
+    </li>
+    <li>
+      <span class="dot" style="background:${penalty < -4 ? "var(--red)" : "var(--gold)"}"></span>
+      <span>Keyword stuffing penalty: <strong>${penalty.toFixed(1)}</strong>
+        ${penalty < -4 ? " ⚠ High — reduce keyword density" : ""}
+      </span>
+    </li>
+    <li>
+      <span class="dot" style="background:var(--text-3)"></span>
+      <span>Resume word count: <strong>${data.resume_length || 0}</strong></span>
+    </li>
+  `;
+
+  // Show results
+  document.getElementById("results").classList.add("show");
+  document.getElementById("results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+
+// ── Helpers ───────────────────────────────────────────────────
+function animateNumber(id, from, to, duration) {
+  const el    = document.getElementById(id);
+  const start = performance.now();
+  function tick(now) {
+    const progress = Math.min((now - start) / duration, 1);
+    const eased    = 1 - Math.pow(1 - progress, 3);
+    el.textContent = Math.round(from + (to - from) * eased);
+    if (progress < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function resetAnalysis() {
+  document.getElementById("results").classList.remove("show");
+  document.getElementById("resetBtn").style.display = "none";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+</script>
+
+</body>
+</html>

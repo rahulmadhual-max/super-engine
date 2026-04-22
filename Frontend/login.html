@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — AI Resume Analyzer</title>
+  <link rel="stylesheet" href="css/global.css" />
+  <link rel="stylesheet" href="css/auth.css" />
+</head>
+<body>
+
+<div class="auth-page">
+
+  <!-- ── Brand Panel ── -->
+  <div class="auth-brand">
+    <div class="brand-logo">
+      <div class="brand-logo-icon">◆</div>
+      ResumeAI
+    </div>
+
+    <div class="brand-hero">
+      <h1>Analyze your resume<br>with <em>precision</em></h1>
+      <p>
+        Our ATS engine scores your resume against any job description —
+        domain-agnostic, bias-free, and actionable.
+      </p>
+    </div>
+
+    <div class="brand-stats">
+      <div class="stat">
+        <span class="stat-num">7</span>
+        <span class="stat-label">Score factors</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num">100</span>
+        <span class="stat-label">Max ATS score</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num">∞</span>
+        <span class="stat-label">Job domains</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Form Panel ── -->
+  <div class="auth-form-panel">
+    <div class="auth-card">
+
+      <div class="auth-card-header">
+        <h2>Sign in</h2>
+        <p>Access your resume analyzer dashboard</p>
+      </div>
+
+      <form class="auth-form" id="loginForm" novalidate>
+
+        <div class="form-group">
+          <label class="form-label" for="email">Email address</label>
+          <input
+            class="form-input" id="email" type="email"
+            placeholder="you@example.com" autocomplete="email" required
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="password">Password</label>
+          <input
+            class="form-input" id="password" type="password"
+            placeholder="••••••••" autocomplete="current-password" required
+          />
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="submitBtn">
+          Sign in
+        </button>
+
+      </form>
+
+      <div class="auth-footer">
+        Don't have an account?
+        <a href="register.html">Create one →</a>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script src="js/utils.js"></script>
+<script>
+  // Redirect if already logged in
+  if (Auth.isLoggedIn()) window.location.href = "index.html";
+
+  document.getElementById("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const email    = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+    const btn      = document.getElementById("submitBtn");
+
+    if (!email || !password) {
+      showToast("Please fill in all fields.", "error");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span> Signing in…`;
+
+    const { ok, data } = await apiFetch("/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+
+    btn.disabled = false;
+    btn.innerHTML = "Sign in";
+
+    if (ok) {
+      Auth.setToken(data.token);
+      Auth.setEmail(data.email);
+      Auth.setName(data.name || "");
+      showToast(data.message, "success");
+      setTimeout(() => window.location.href = "index.html", 800);
+    } else {
+      showToast(data.error || "Login failed. Please try again.", "error");
+    }
+  });
+</script>
+
+</body>
+</html>
